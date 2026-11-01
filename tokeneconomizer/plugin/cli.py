@@ -42,7 +42,8 @@ import sys
 import time
 
 from .. import loopguard
-from . import accounting, denylist, fold, hosts, paths, repomap, repos, sidecall, toolcheck
+from . import (accounting, backfill, denylist, fold, hosts, paths, repomap, repos, sidecall,
+               toolcheck)
 from .config import canonical, unset_config, write_config
 from .context import LiveContext
 from .paths import state_root
@@ -130,6 +131,7 @@ def cmd_status(args):
                                                       ctx.host.name)},
         "loopguard": {"mode": cfg.loopguard, "envelope": env_tracker.envelope,
                       "ended_green_turns": len(env_tracker.resolved_turns)},
+        "backfill": ctx.store.read(backfill.STATE),
         "ledger": ledger})
     if args.json:
         print(json.dumps(out, indent=2, default=str))
@@ -154,6 +156,10 @@ def cmd_status(args):
           f"{accounting.fmt_tokens(ledger['effective_tokens'])} effective tokens, plugin "
           f"overhead {accounting.fmt_tokens(ledger['overhead_tokens'])} "
           f"({ledger['overhead_frac']:.1%})")
+    bf = out["backfill"]
+    print("  history      " + (f"{bf['folded']} earlier session(s) from {ctx.host.name}'s own "
+                              f"history folded" if bf else
+                              "not read yet" if cfg.backfill != "off" else "not read (backfill=off)"))
     i = out["microskills"]
     print(f"  microskills  {i['injected_lines']} fact(s) injected at session start "
           f"({i['sessions_folded']} sessions learned from)")
@@ -513,6 +519,16 @@ def cmd_fold(args):
     return 0
 
 
+def cmd_backfill(args):
+    """Fold this repository's sessions from the agent's own history, once (see backfill.py)."""
+    # Into the repository the session that started it is pinned to, like a fold.
+    ctx = _session_ctx(args, (args.exclude or [None])[0])
+    state = backfill.run(ctx, exclude=args.exclude or ())
+    if args.verbose:
+        print(json.dumps(state))
+    return 0
+
+
 def cmd_judge(args):
     """The detached half of the stuck judge (see plugin/judge.py); not for people."""
     from . import judge
@@ -736,6 +752,10 @@ def build_parser():
     p.add_argument("--session", action="append")
     p.add_argument("--verbose", action="store_true")
     p.set_defaults(fn=cmd_fold)
+    p = add("backfill")
+    p.add_argument("--exclude", action="append")
+    p.add_argument("--verbose", action="store_true")
+    p.set_defaults(fn=cmd_backfill)
     p = add("judge")
     p.add_argument("--session", required=True)
     p.add_argument("--job", required=True)

@@ -13,6 +13,7 @@ What happens at each hook, and how each agent was verified to behave, is in
 | `controller.py` | what happens at each hook |
 | `hosts.py` | per-agent hook payloads and outputs (Claude Code, Codex, Copilot CLI, Pi) |
 | `fold.py` | a finished session through `PrefixStage` and `ToolingStage` |
+| `backfill.py` | a repository's earlier sessions from the agent's own history, folded once at its first session |
 | `denylist.py` | writing the deny list into each agent's settings (by itself under `auto`, on `toolprune apply` under `propose`), and taking it back |
 | `toolcheck.py` | asking the agent CLIs what a session loads, and what a deny list removed |
 | `config.py` | settings, their sources, and the earlier names they are still read under |

@@ -46,6 +46,10 @@ person can tune by hand:
   * loopguard.<name>            -- one guard threshold, pinned over the preset and over what the
                                    repository's history learned (LOOPGUARD_KEYS);
   * repomap, repomap_tokens, repomap_python, repomap_timeout -- the opt-in repository map;
+  * backfill, backfill_sessions -- on a repository's first session, fold the most recent
+                                   `backfill_sessions` of its sessions the agent kept in its
+                                   own history (Claude Code's `~/.claude/projects/`), so learning
+                                   starts from them; once per repository (`backfill.py`);
   * pi_extensions, pi_cli       -- on Pi, the extensions the plugin's own model calls load (a
                                    custom provider's, whose model they could not reach otherwise;
                                    comma-separated paths), and the `pi` they run.
@@ -76,7 +80,7 @@ AGGR = ("conservative", "default", "aggressive")
 
 # What `on` turns each mechanism to, and the words read as on / off.
 ON_VALUE = {"microskills": "envfacts+distiller", "toolprune": "auto", "loopguard": "nudge",
-            "repomap": "on"}
+            "repomap": "on", "backfill": "on"}
 _ON = ("on", "true", "yes", "1", "enable", "enabled")
 _OFF = ("off", "false", "no", "0", "disable", "disabled")
 # Values renamed with their mechanism.
@@ -163,6 +167,8 @@ class LiveConfig:
     repomap_tokens: int = 2048
     repomap_python: str = ""
     repomap_timeout: int = 8
+    backfill: str = "on"
+    backfill_sessions: int = 20
     paid_model: str = ""
     pi_extensions: list = field(default_factory=list)
     pi_cli: str = ""
@@ -172,6 +178,7 @@ class LiveConfig:
 
     _CHOICES = {"mode": MODES, "microskills": MICROSKILLS, "toolprune": TOOLPRUNE,
                 "loopguard": LOOPGUARD, "repomap": REPOMAP, "loopguard_aggr": AGGR,
+                "backfill": ("off", "on"),
                 "vocabulary": ("auto", "generic", "python-git", "node-web")}
     # The smallest value a number setting takes, where it is not 1.
     _MIN = {"toolprune_quiet_minutes": 0}
@@ -276,6 +283,7 @@ _ENV = {"TE_MODE": "mode", "TE_SHADOW": "shadow",
         "TE_LOOPGUARD_NUDGES": "loopguard_nudges",
         "TE_REPOMAP": "repomap", "TE_REPOMAP_TOKENS": "repomap_tokens",
         "TE_REPOMAP_PYTHON": "repomap_python", "TE_REPOMAP_TIMEOUT": "repomap_timeout",
+        "TE_BACKFILL": "backfill", "TE_BACKFILL_SESSIONS": "backfill_sessions",
         "TE_PI_EXTENSIONS": "pi_extensions", "TE_PI_CLI": "pi_cli"}
 _ENV_THRESHOLDS = ("TE_SPIRAL_THRESHOLDS", "TE_LOOPGUARD_THRESHOLDS")
 

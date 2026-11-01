@@ -13,7 +13,7 @@ the hooks run) and `plugin/` (the packaging for each agent). To install and use 
 
 | Hook | What the plugin does | Mechanism it drives |
 |---|---|---|
-| `SessionStart` | Injects the repository's micro-skills (a cached render) as `additionalContext`, at a new start, and on a Copilot resume the text that session started with (§3); announces changed facts, tools the deny list newly left out, or, under `toolprune=propose` (or when `auto` could not write the file), a proposal still waiting, each in one `systemMessage` line; folds any earlier session whose end was never seen | microskills |
+| `SessionStart` | Injects the repository's micro-skills (a cached render) as `additionalContext`, at a new start, and on a Copilot resume the text that session started with (§3); announces changed facts, tools the deny list newly left out, or, under `toolprune=propose` (or when `auto` could not write the file), a proposal still waiting, each in one `systemMessage` line; folds any earlier session whose end was never seen; at a repository's first session, folds its most recent `backfill_sessions` sessions from the agent's own history (Claude Code's `~/.claude/projects/`) in a detached `te backfill`, once (`backfill.json`), and says so at the next start | microskills, toolprune |
 | `UserPromptSubmit` | Opens a prompt-turn for the loop guard | loopguard |
 | `PostToolUse` | Folds the call into the turn's guard; delivers a redirect as `additionalContext`, then, if the turn is still stuck, a one-line notice to the person (on Claude Code, also as context asking the model to repeat it); never stops the turn | loopguard |
 | `PostToolUseFailure` | The same, for a call that failed (Claude Code and Copilot report a failed call only here); the answer names this event, as Claude Code requires | loopguard |
@@ -509,6 +509,12 @@ per repository and host: the mechanisms' own state, `ledger.jsonl` (one priced r
 session), `events.jsonl` (every injection, redirect and still-stuck notice), and per-session guard state.
 Uninstalling the plugin leaves this directory; delete it to forget. `te repos` lists what it
 holds.
+
+The plugin reads one thing outside it: with `backfill` on (the default), the first session in a
+repository reads Claude Code's own session logs (`~/.claude/projects/*/*.jsonl`) to find that
+repository's earlier sessions -- a log belongs to it when the directory it started in resolves to
+the repository's key -- and folds them like any finished session. Nothing there is written, and
+other agents' histories are not read yet.
 
 Which repository a session belongs to (`plugin/paths.py`, `plugin/repos.py`):
 

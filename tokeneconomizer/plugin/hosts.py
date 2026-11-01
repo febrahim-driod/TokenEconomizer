@@ -190,6 +190,32 @@ class Host:
     def tool_usage(self, trace_path):
         return trace.tool_usage(trace_path)
 
+    def history(self, env):
+        """(session id, log path, directory the session started in) for each session this
+        agent kept in its own history, for `backfill`; none where it is not read."""
+        return []
+
+
+def _log_cwd(path, max_lines=32):
+    """The first `cwd` a JSONL session log names, from its first lines; None if they name none."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for _, line in zip(range(max_lines), fh):
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(obj, dict) and isinstance(obj.get("cwd"), str) and obj["cwd"]:
+                    return obj["cwd"]
+    except OSError:
+        return None
+    return None
+
+
+def claude_home(env=None):
+    env = os.environ if env is None else env
+    return env.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+
 
 def _failure_response(p):
     """A PostToolUseFailure payload's `error` as a response; None for any other payload. A
@@ -257,6 +283,29 @@ class ClaudeCode(Host):
 
     def tool_usage(self, trace_path):
         return trace.claude_tool_usage(os.path.realpath(trace_path))
+
+    def history(self, env):
+        # One log per session, `<config dir>/projects/<cwd with every non-alphanumeric as
+        # "-">/<session id>.jsonl`; a subagent's log sits a level deeper and is not a session.
+        projects = os.path.join(claude_home(env), "projects")
+        try:
+            dirs = sorted(os.listdir(projects))
+        except OSError:
+            return []
+        out = []
+        for d in dirs:
+            try:
+                names = sorted(os.listdir(os.path.join(projects, d)))
+            except OSError:
+                continue
+            for name in names:
+                path = os.path.join(projects, d, name)
+                if not name.endswith(".jsonl") or not os.path.isfile(path):
+                    continue
+                cwd = _log_cwd(path)
+                if cwd:
+                    out.append((name[:-len(".jsonl")], path, cwd))
+        return out
 
 
 _CODEX_SHELL = {"bash", "shell", "exec_command", "local_shell", "unified_exec",

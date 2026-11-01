@@ -896,6 +896,89 @@ def test_a_session_whose_end_was_missed_is_folded_by_the_next_start(env, repo, t
     assert "lost" in store_for(env, repo).read("folded.json")
 
 
+# ---- the agent's own history ---------------------------------------------------------------
+def _history(env, tmp_path, cwd, sid, age_s, i=0):
+    """A session Claude Code kept under `<config dir>/projects/`, started in `cwd`, last
+    written `age_s` ago."""
+    d = tmp_path / "claude-home" / "projects" / cwd.replace(os.sep, "-")
+    d.mkdir(parents=True, exist_ok=True)
+    path = trap_session(str(d / f"{sid}.jsonl"), cwd, i)
+    with open(path) as fh:
+        lines = [dict(json.loads(ln), cwd=cwd, sessionId=sid) for ln in fh]
+    with open(path, "w") as fh:
+        fh.write("\n".join(json.dumps(x) for x in lines) + "\n")
+    t = time.time() - age_s
+    os.utime(path, (t, t))
+    return path
+
+
+@pytest.fixture
+def henv(env, tmp_path):
+    return dict(env, CLAUDE_CONFIG_DIR=str(tmp_path / "claude-home"))
+
+
+def test_the_first_start_learns_from_the_repositorys_sessions_in_the_agents_history(
+        henv, repo, tmp_path):
+    """The repository's earlier sessions, from Claude Code's own history, are folded at its first
+    start: the most recent `backfill_sessions`, oldest first, from any directory inside it, and
+    none of another directory's, a subagent's or one still being written."""
+    os.makedirs(os.path.join(repo, "pkg"))
+    for i in range(4):
+        _history(henv, tmp_path, repo, f"h{i}", age_s=86400 * (10 - i), i=i)
+    _history(henv, tmp_path, os.path.join(repo, "pkg"), "sub", age_s=86400 * 3)
+    other = str(tmp_path / "elsewhere")
+    os.makedirs(other)
+    _history(henv, tmp_path, other, "other", age_s=86400)
+    _history(henv, tmp_path, repo, "live", age_s=5)
+    agent = tmp_path / "claude-home" / "projects" / repo.replace(os.sep, "-") / "h3" / "subagents"
+    agent.mkdir(parents=True)
+    (agent / "agent-x.jsonl").write_text(open(_history(henv, tmp_path, repo, "x", 86400)).read())
+    os.remove(str(agent.parent.parent / "x.jsonl"))
+
+    t = str(tmp_path / "now.jsonl")
+    open(t, "w").close()
+    first = call(dict(henv, TE_BACKFILL_SESSIONS="4"), {
+        "hook_event_name": "SessionStart", "session_id": "now", "source": "startup",
+        "transcript_path": t, "cwd": repo})
+    st = store_for(henv, repo)
+    ledger = st.read_lines("ledger.jsonl")
+    assert [r["session_id"] for r in ledger] == ["h1", "h2", "h3", "sub"]
+    assert all(r["backfill"] for r in ledger)
+    # A session's subagents are its own: h3's log and its subagent's are priced together.
+    assert [r["requests"] for r in ledger] == [3, 3, 6, 3]
+    assert st.read("backfill.json")["folded"] == 4
+    assert st.read("injection.json")["sessions"] == 4
+    assert "earlier session(s)" not in json.dumps(first)
+
+    # Announced once, at the next start; the history is not read again.
+    _history(henv, tmp_path, repo, "late", age_s=86400)
+    starts = [run_session(henv, repo, f"n{i}", t) for i in range(2)]
+    assert "learned from 4 earlier session(s)" in starts[0]["systemMessage"]
+    assert "earlier session(s)" not in json.dumps(starts[1])
+    # What the history taught reaches the new session's context.
+    assert "python -m pytest" in starts[0]["hookSpecificOutput"]["additionalContext"]
+    assert "late" not in st.read("folded.json")
+
+
+def test_a_session_from_the_history_resumed_later_is_not_folded_again(henv, repo, tmp_path):
+    path = _history(henv, tmp_path, repo, "old", age_s=86400)
+    t = str(tmp_path / "now.jsonl")
+    open(t, "w").close()
+    run_session(henv, repo, "now", t)
+    run_session(henv, repo, "old", path, source="resume")
+    sids = [r["session_id"] for r in store_for(henv, repo).read_lines("ledger.jsonl")]
+    assert sorted(sids) == ["now", "old"]
+
+
+def test_backfill_off_reads_no_history(henv, repo, tmp_path):
+    _history(henv, tmp_path, repo, "old", age_s=86400)
+    t = str(tmp_path / "now.jsonl")
+    open(t, "w").close()
+    run_session(dict(henv, TE_BACKFILL="off"), repo, "now", t)
+    st = store_for(henv, repo)
+    assert "old" not in st.read("folded.json") and st.read("backfill.json") is None
+
+
 # ---- never break the session ---------------------------------------------------------------
 def test_garbage_input_and_internal_errors_answer_no_change(env, repo, monkeypatch):
     out = io.StringIO()

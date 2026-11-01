@@ -35,3 +35,14 @@ def _no_model_calls(request, monkeypatch):
         return
     for name in ("claude_call", "codex_call", "copilot_call", "pi_call"):
         monkeypatch.setattr(sidecall, name, lambda *a, **k: ("", None))
+
+
+@pytest.fixture(autouse=True)
+def _no_real_history(tmp_path, monkeypatch):
+    """No test reads the agent history of whoever runs it: Claude Code's config directory is an
+    empty one unless the test's environment names its own (`CLAUDE_CONFIG_DIR`)."""
+    from tokeneconomizer.plugin import hosts
+    real = hosts.claude_home
+    monkeypatch.setattr(hosts, "claude_home", lambda env=None: real(
+        env if env and env.get("CLAUDE_CONFIG_DIR") else
+        {"CLAUDE_CONFIG_DIR": str(tmp_path / "no-claude-home")}))
