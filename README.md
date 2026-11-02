@@ -63,8 +63,9 @@ mechanisms:
   turn is still stuck after that, TokenEconomizer tells you how to stop it; it never stops a turn
   itself.
 
-TokenEconomizer is a plugin for **Claude Code**, **Codex**, the **GitHub Copilot CLI** and **Pi**,
-with experimental support for **opencode**. Each italic letter above is a setting, shown with its
+TokenEconomizer is a plugin for **Claude Code**, **Codex**, the **GitHub Copilot CLI**, **Pi**
+and **Grok Build**, with experimental support for **opencode**. Each italic letter above is a
+setting, shown with its
 default ([Settings](#settings)), and each mechanism can be turned on or off. The plugin announces
 each action in one line, and if any part of it fails, your session carries on as if it were not
 installed. Its model calls (the fact proposer, and the judge with the redirect it writes) run
@@ -173,6 +174,28 @@ Start `opencode` and send a prompt, then check in the repository with
 `~/.tokeneconomizer/bin/te --host opencode status`. opencode has no plugin commands, so the
 plugin's commands run from a terminal.
 
+**Grok Build**
+
+```sh
+git clone https://github.com/microsoft/TokenEconomizer.git
+mkdir -p ~/.grok/plugins
+ln -s "$PWD/TokenEconomizer/plugin" ~/.grok/plugins/tokeneconomizer
+```
+
+Grok leaves a plugin off until its name is listed. In `~/.grok/config.toml`:
+
+```toml
+[plugins]
+enabled = ["tokeneconomizer"]
+```
+
+Quit and start `grok` again. An already-open session keeps the plugin list it started with.
+`grok plugin list` shows marketplace installs; `grok inspect` shows this directory plugin.
+Then run `/tokeneconomizer:status`, or from a terminal `~/.tokeneconomizer/bin/te --host grok status`.
+Grok does not get a tool deny list. Learned facts are sent with the first tool result: a
+SessionStart reply's model context is not read, and a UserPromptSubmit reply's added context
+is discarded.
+
 If the install worked, the status command prints a short status block. `refresh-catalog`
 records every tool a session loads (without a model call), so that tool pruning can consider all
 of them. Keep the marketplace path absolute, as above: the Copilot CLI reads a relative path such
@@ -182,7 +205,7 @@ To update:
 
 | Agent | Update |
 |---|---|
-| Claude Code, Copilot CLI, opencode | `git pull` in the clone |
+| Claude Code, Copilot CLI, opencode, Grok Build | `git pull` in the clone |
 | Codex | `git pull` in the clone, then the `codex plugin add` line again |
 | Pi | `pi update --extensions` |
 
@@ -198,6 +221,7 @@ uninstalling, using Copilot with your own model key, and troubleshooting.
 | Copilot CLI | 1.0.83 to 1.0.102 | not supported |
 | Pi | 1.2.0 to 1.3.0 | 0.99.x: load the extension by path (below) |
 | opencode (experimental) | 1.19.5 and 2.2.0 | not tested |
+| Grok Build | 1.0.70 | not tested on earlier builds |
 
 The commands above were tested on the oldest and newest version in each range; newer versions
 have not been tested yet.
@@ -208,6 +232,8 @@ have not been tested yet.
   full path; `git pull` in the clone updates it.
 - **opencode** support is experimental: it was tested on 1.19.5 and 2.2.0 only, and not in the
   2.x terminal UI.
+- **Grok Build**: the adapter was checked against 1.0.70's hook contract and a local session log.
+  The install above is a symlink; a session that is already open does not load it until restart.
 
 ### Everyday commands
 
@@ -220,6 +246,7 @@ commands. They have the same names on every agent; only the way you type them di
 | Codex | `$tokeneconomizer:<command>` |
 | Pi | `/te <command>` |
 | opencode | from a terminal: `~/.tokeneconomizer/bin/te --host opencode <command>` |
+| Grok Build | `/tokeneconomizer:<command>`, or `te --host grok <command>` |
 | a terminal, in the repository | `~/.tokeneconomizer/bin/te <command>` |
 
 | Command | What it does |
@@ -296,6 +323,7 @@ what it can leave out differs:
 | Copilot CLI | whole MCP servers | `.github/copilot/settings.local.json` |
 | Pi | nothing (Pi loads only four tools) | — |
 | opencode | nothing yet | — |
+| Grok Build | nothing (no deny-list file is written) | — |
 
 Tool pruning adds only its own entries and never touches deny rules you wrote; a settings file it
 creates is kept out of git (`.git/info/exclude`). On Claude Code, the session-start line that says
@@ -321,7 +349,7 @@ redirects, you see one line that ends with how to stop it:
 > calls). Press Esc to interrupt it.
 
 Where that line appears, and how to stop the turn, in the terminal UI and in a headless run
-(`claude -p`, `codex exec`, `copilot -p`, `pi -p`, `opencode run`):
+(`claude -p`, `codex exec`, `copilot -p`, `pi -p`, `opencode run`, `grok -p`):
 
 | Agent | Interactive: where it shows | How to stop | Headless: where it shows | How to stop |
 |---|---|---|---|---|
@@ -330,6 +358,7 @@ Where that line appears, and how to stop the turn, in the terminal UI and in a h
 | Copilot CLI | in the conversation | Esc twice | on stdout | Ctrl+C |
 | Pi | as a notification | Esc | on stderr | Ctrl+C |
 | opencode | as a notification | Esc | on stderr | Ctrl+C |
+| Grok Build | systemMessage on the tool result | Esc | not shown | Ctrl+C |
 
 - **Claude Code** shows a plugin's own lines only in its detailed transcript (Ctrl+O), so the
   plugin asks Claude to repeat this one in its reply; the model may word it differently or leave
@@ -338,6 +367,9 @@ Where that line appears, and how to stop the turn, in the terminal UI and in a h
   `codex exec` prints no hook messages.
 - **Pi**: Ctrl+C ends a headless run, but a command it started runs on until it finishes.
 - **opencode** 2.x prints the line to the opencode server's error output, not in its terminal UI.
+- **Grok Build** sends that line as `systemMessage` on the tool-result hook. Session start shows
+  `systemMessage`. Whether the tool-result hook shows it in the TUI was not re-checked. The
+  redirect before it is `additionalContext`, which the model does receive with the tool result.
 
 In a headless run nobody may be watching, so a flagged turn runs until it ends or reaches the
 agent's own limits; afterwards, `te status` counts the redirects and "still stuck" notices.

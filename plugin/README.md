@@ -1,12 +1,12 @@
 # TokenEconomizer plugin
 
-How to install and use TokenEconomizer in Claude Code, Codex, the GitHub Copilot CLI, Pi and
-(experimental) opencode. What the plugin does and why is in the [main README](../README.md); its
+How to install and use TokenEconomizer in Claude Code, Codex, the GitHub Copilot CLI, Pi,
+Grok Build and (experimental) opencode. What the plugin does and why is in the [main README](../README.md); its
 design and the verified behaviour of each agent are in [`docs/PLUGIN.md`](../docs/PLUGIN.md).
 
 - [Before you start](#before-you-start)
 - Install and use it on [Claude Code](#claude-code) · [Codex](#codex) ·
-  [Copilot CLI](#copilot-cli) · [Pi](#pi)
+  [Copilot CLI](#copilot-cli) · [Pi](#pi) · [Grok Build](#grok-build)
 - [What to expect](#what-to-expect) · [Commands](#commands) · [Settings](#settings)
 - [Repository map](#repository-map) · [Using with rtk](#using-with-rtk) ·
   [Model calls and API keys](#model-calls-and-api-keys) · [Troubleshooting](#troubleshooting)
@@ -345,6 +345,38 @@ still-stuck notice was printed (`opencode run`) and the first notice shown as a 
 **Not covered:** the 2.x TUI, and notices on 2.x, which go to the server's stderr rather than a
 toast. A `read`, `task` or `*` permission denial stalls opencode 1.19.5 at start-up, which is why
 the side call denies only `bash`, `edit`, `webfetch` and `websearch`.
+
+## Grok Build
+
+Link the plugin directory where Grok trusts plugins for every project. The link has to be the
+`plugin/` directory: its `lib` symlink and the repository beside it are how the hook finds the
+package.
+
+```bash
+mkdir -p ~/.grok/plugins
+ln -s /path/to/TokenEconomizer/plugin ~/.grok/plugins/tokeneconomizer
+```
+
+Grok does not load that directory until the plugin name is enabled. Add it to
+`~/.grok/config.toml` (`grok plugin list` only shows marketplace installs; `grok inspect` shows
+this one):
+
+```toml
+[plugins]
+enabled = ["tokeneconomizer"]
+```
+
+Quit `grok` and start it again. A session that is already open keeps the plugins it loaded at
+start. Check with `/tokeneconomizer:status` or, from a terminal,
+`~/.tokeneconomizer/bin/te --host grok status`.
+
+Grok reads `systemMessage` at session start and delivers `hookSpecificOutput.additionalContext`
+on PostToolUse. It discards context added at UserPromptSubmit. Facts and a repository map are
+held and sent with the first tool result that is not a subagent's. Tool pruning is not applied.
+The plugin's own model calls go through `grok -p`, not another agent's CLI.
+
+`git pull` in the clone updates the link. Remove `~/.grok/plugins/tokeneconomizer` to uninstall
+this copy. That does not remove a Claude Code install of the same plugin.
 
 ## What to expect
 

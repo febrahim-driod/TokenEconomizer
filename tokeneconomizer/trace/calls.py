@@ -2,9 +2,10 @@
 
 `load_trajectory` reads a saved session log of any supported agent -- a Claude Code transcript
 or `stream-json`, a Copilot CLI event log, a Codex `exec --json` stream -- and returns the same
-tuples, so a mechanism never needs to know which agent wrote the file. A Codex rollout and a Pi
-session are converted into one of these first (`codex.codex_rollout_to_exec`,
-`pi.pi_session_to_claude`).
+tuples, so a mechanism never needs to know which agent wrote the file. A Codex rollout, a Pi
+session, an opencode session and a Grok `updates.jsonl` are converted into one of these first
+(`codex.codex_rollout_to_exec`, `pi.pi_session_to_claude`, `opencode.opencode_session_to_claude`,
+`grok.grok_session_to_claude`).
 """
 import os
 import re

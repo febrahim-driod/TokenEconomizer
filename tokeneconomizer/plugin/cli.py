@@ -31,8 +31,8 @@
 
 `te facts` and `te untool` are the earlier names of `microskills` and `toolprune`, and still work.
 `--cwd` picks the repository (default: the current directory) and `--host` the agent
-(claude | codex | copilot | pi; default: `TE_HOST`, else the agent whose shell runs `te`, else
-claude).
+(claude | codex | copilot | opencode | pi | grok; default: `TE_HOST`, else the agent whose
+shell runs `te`, else claude).
 """
 import argparse
 import glob
@@ -642,10 +642,10 @@ def cmd_doctor(args):
         ok = False
     import shutil as _sh
     # Only the agents installed here: a Codex-only machine has no Claude Code catalog to probe.
-    agents = [h for h in ("claude", "codex", "copilot", "opencode", "pi")
+    agents = [h for h in ("claude", "codex", "copilot", "opencode", "pi", "grok")
               if _sh.which(sidecall.claude_cli() if h == "claude" else h)]
     print(f"agents      "
-          f"{', '.join(agents) or 'none of claude, codex, copilot, opencode, pi on PATH'}")
+          f"{', '.join(agents) or 'none of claude, codex, copilot, opencode, pi, grok on PATH'}")
     for h in agents:
         pause = sidecall.paused(h, root)
         if pause:

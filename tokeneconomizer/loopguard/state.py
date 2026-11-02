@@ -43,6 +43,11 @@ _TOOL_CANON = {
     "edit": "edit", "multiedit": "edit", "str_replace": "edit",
     "apply_patch": "edit",
     "write": "create", "create": "create",
+    # Grok Build's displayed tool names, and the shell's tool id (`run_terminal_cmd`).
+    "run_terminal_command": "bash", "run_terminal_cmd": "bash",
+    "read_file": "view",
+    "search_replace": "edit",
+    "list_dir": "glob",
 }
 
 
@@ -179,7 +184,7 @@ class SpiralState:
         action = tool_name or "?"
         if tool_name in _EDIT_TOOLS:
             b = basename(args.get("path") or args.get("filePath")
-                          or args.get("file_path") or "")
+                          or args.get("file_path") or args.get("target_file") or "")
             if b:
                 self.edit_order.append(b)
                 self.edit_counts[b] = self.edit_counts.get(b, 0) + 1
@@ -193,7 +198,8 @@ class SpiralState:
         elif tool_name in ("grep", "glob"):
             action = f"{tool_name} {str(args.get('pattern') or '')[:40]}"
         elif tool_name == "view":
-            action = f"view {basename(args.get('path') or args.get('file_path') or '')}"
+            action = ("view " + basename(args.get("path") or args.get("file_path")
+                                         or args.get("target_file") or ""))
         fail = None
         can_fail = failed is True if tool_name in _CONTENT_TOOLS else failed is not False
         if result_text and can_fail and ERR_RE.search(result_text):

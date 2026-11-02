@@ -35,14 +35,21 @@ endpoint (docs/PLUGIN.md §3):
 
 `detect` picks the adapter from the payload: Codex's `turn_id`, or a transcript under `.codex/`
 named `rollout-*`; Copilot's session-state transcript, or no transcript at all inside a Copilot
-hook process; Claude Code otherwise. Each plugin hook file except Claude Code's also passes
-`--host` explicitly, so detection is the fallback rather than the rule.
+hook process; a transcript under `.grok/sessions/`, or `GROK_HOOK_EVENT` / `GROK_SESSION_ID`
+when the transcript is not already another agent's; Claude Code otherwise. Each plugin hook
+file except Claude Code's and Grok's also passes `--host` explicitly, so detection is the
+fallback rather than the rule. Grok loads the same hook file as Claude Code.
+
+Grok's SessionStart shows only `systemMessage`, and it discards UserPromptSubmit context.
+`Grok.defers_start_context` holds the model text for the first PostToolUse, which does
+deliver `hookSpecificOutput.additionalContext`.
 """
 import json
 import os
 import re
 import shlex
 import time
+from urllib.parse import unquote
 
 from .. import trace
 
@@ -151,6 +158,11 @@ class Host:
     # Whether a resumed conversation still carries the context its first SessionStart added, so
     # the plugin need not add it again (Claude Code 2.1.307 and Codex 0.163.0 replay it).
     keeps_start_context = True
+
+    # Whether SessionStart context has to wait for a later event. Grok shows only
+    # `systemMessage` there and drops UserPromptSubmit context; PostToolUse delivers it.
+    # Every other host leaves this false, so their SessionStart output is unchanged.
+    defers_start_context = False
 
     def relay(self, text):
         """What the model is asked, so that it passes `text` on to the person, word for word.
@@ -438,6 +450,91 @@ class OpenCode(Host):
         return trace.opencode_session_usage(transcript_path)
 
 
+def grok_home(env=None):
+    env = os.environ if env is None else env
+    return env.get("GROK_HOME") or os.path.join(os.path.expanduser("~"), ".grok")
+
+
+class Grok(Host):
+    """Grok Build, through the same `hooks/hooks.json` Claude Code loads.
+
+    The hook stdin is Claude-shaped and also carries camelCase (`promptId`, `sessionId`,
+    `toolName`, `toolInput`, `toolResult`, `subagentType`). `promptId` is not in the snake_case
+    alias list. Tool events often omit it; the turn is the one `UserPromptSubmit` opened.
+    A shell result's text is `output_for_prompt` (its `output` is a list) and it carries
+    `exit_code`. Session logs are `<GROK_HOME>/sessions/<percent-encoded cwd>/<id>/updates.jsonl`.
+    """
+    name = "grok"
+    prompt_context = False             # UserPromptSubmit additionalContext is discarded
+    keeps_start_context = False        # source "load" is a resume, and context is not replayed
+    defers_start_context = True
+    relays_notices = False              # PostToolUse additionalContext reaches the model
+    interrupt = "Press Esc to interrupt it."
+    end_run = "Press Ctrl+C to end the run."
+
+    def session_id(self, p):
+        return str(p.get("session_id") or p.get("sessionId") or "")
+
+    def cwd(self, p, env):
+        return (p.get("cwd") or p.get("workspaceRoot") or env.get("GROK_WORKSPACE_ROOT")
+                or env.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+
+    def turn_key(self, p):
+        return str(p.get("promptId") or p.get("prompt_id") or "")
+
+    def is_subagent(self, p):
+        return bool(p.get("subagentType") or p.get("agent_id"))
+
+    def tool_call(self, p):
+        payload = p
+        if "tool_name" not in p and p.get("toolName"):
+            payload = dict(payload, tool_name=str(p.get("toolName")))
+        if not isinstance(payload.get("tool_input"), dict) and isinstance(p.get("toolInput"), dict):
+            payload = dict(payload, tool_input=p["toolInput"])
+        if payload.get("tool_response") is None and p.get("toolResult") is not None:
+            payload = dict(payload, tool_response=p["toolResult"])
+        name, args, text, code = super().tool_call(payload)
+        resp = payload.get("tool_response")
+        extracted = trace.grok_result_text(resp)
+        if extracted:
+            text = extracted
+        if code is None:
+            code = trace.grok_exit_code(resp)
+        return name, args, text, code
+
+    def mechanism_trace(self, transcript_path, workdir):
+        out = os.path.join(workdir, "grok_trace.jsonl")
+        n = trace.grok_session_to_claude(transcript_path, out)
+        return out if n is not None else None
+
+    def session_usage(self, transcript_path):
+        return trace.grok_session_usage(transcript_path)
+
+    def prompt_count(self, transcript_path):
+        return trace.grok_prompt_count(transcript_path)
+
+    def history(self, env):
+        root = os.path.join(grok_home(env), "sessions")
+        try:
+            encoded_dirs = os.listdir(root)
+        except OSError:
+            return []
+        out = []
+        for encoded in encoded_dirs:
+            cwd = unquote(encoded)
+            if not os.path.isabs(cwd):
+                continue
+            try:
+                session_ids = os.listdir(os.path.join(root, encoded))
+            except OSError:
+                continue
+            for sid in session_ids:
+                path = os.path.join(root, encoded, sid, "updates.jsonl")
+                if os.path.isfile(path):
+                    out.append((sid, path, cwd))
+        return out
+
+
 def copilot_home(env=None):
     env = os.environ if env is None else env
     return env.get("COPILOT_HOME") or os.path.join(os.path.expanduser("~"), ".copilot")
@@ -530,7 +627,7 @@ def _ancestor_args(limit=4):
 
 
 HOSTS = {"claude": ClaudeCode, "codex": Codex, "copilot": Copilot, "opencode": OpenCode,
-         "pi": Pi}
+         "pi": Pi, "grok": Grok}
 
 
 def default_host(env=None, recent=None):
@@ -545,6 +642,10 @@ def default_host(env=None, recent=None):
         return "claude"
     if env.get("COPILOT_CLI") == "1":
         return "copilot"
+    # Set on a Grok hook process, and on a shell that inherited the session id. A plain
+    # terminal has neither and stays on `recent`, then Claude Code.
+    if env.get("GROK_HOOK_EVENT") or env.get("GROK_SESSION_ID"):
+        return "grok"
     return recent if recent in HOSTS else "claude"
 
 
@@ -565,4 +666,13 @@ def detect(payload, env=None, hint=None):
     # tag a Claude Code session started from inside Copilot -- hence the transcript test first.)
     if not tp and (env or {}).get("COPILOT_PLUGIN_ROOT"):
         return Copilot()
+    if "/.grok/sessions/" in sp:
+        return Grok()
+    # A relocated GROK_HOME does not contain `/.grok/sessions/`. The hook environment still
+    # names Grok, unless the transcript is already another agent's.
+    genv = env or {}
+    other = ("/.claude/projects/" in sp or "/.codex/" in sp
+             or ("/session-state/" in sp and tp.endswith("events.jsonl")))
+    if (genv.get("GROK_HOOK_EVENT") or genv.get("GROK_SESSION_ID")) and not other:
+        return Grok()
     return ClaudeCode()

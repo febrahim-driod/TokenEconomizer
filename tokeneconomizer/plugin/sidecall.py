@@ -382,6 +382,54 @@ def copilot_call(prompt, model="", cli="copilot", timeout=TIMEOUT_S):
     return text, eff
 
 
+# Grok tool ids and the names the model is shown. An empty `--tools` does not remove tools.
+_GROK_DENY = ("run_terminal_command", "run_terminal_cmd", "write", "search_replace",
+              "web_search", "web_fetch", "spawn_subagent", "task")
+
+
+def grok_argv(prompt, model="", cli="grok"):
+    """`grok -p` for one read-only turn. No live call: tests check this list."""
+    cmd = [cli, "-p", prompt, "--output-format", "json", "--max-turns", "1",
+           "--permission-mode", "plan", "--no-subagents", "--no-auto-update",
+           "--disallowed-tools", ",".join(_GROK_DENY)]
+    if model:
+        cmd += ["--model", model]
+    return cmd
+
+
+def grok_call(prompt, model="", cli="grok", timeout=TIMEOUT_S):
+    """One completion through `grok -p`. Headless `usage.input_tokens` is already uncached.
+    `reasoning_tokens` is separate from `output_tokens` and is added to the output count."""
+    cmd = grok_argv(prompt, model=model, cli=cli)
+    with tempfile.TemporaryDirectory(prefix="te-side-") as cwd:
+        out = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace",
+                             timeout=timeout, env=_env(), cwd=cwd, stdin=subprocess.DEVNULL)
+    try:
+        data = json.loads(out.stdout or "{}")
+    except ValueError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    text = data.get("text") if isinstance(data.get("text"), str) else ""
+    if not text:
+        _no_reply("grok", out)
+    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    if usage.get("input_tokens") is None:
+        return text, None
+    reasoning = usage.get("reasoning_tokens")
+    output_tokens = int(usage.get("output_tokens") or 0)
+    if isinstance(reasoning, int) and not isinstance(reasoning, bool):
+        output_tokens += reasoning
+    model_name = next(iter(data.get("modelUsage") or {}), None) or model or "grok"
+    eff, _ = accounting.effective({
+        "input_tokens": usage.get("input_tokens"),
+        "cache_read_input_tokens": int(usage.get("cache_read_input_tokens") or 0),
+        "cache_creation_input_tokens": int(usage.get("cache_creation_input_tokens") or 0),
+        "output_tokens": output_tokens,
+        "model": model_name})
+    return text, eff
+
+
 def runner_for(host_name, config):
     """The optimizer callable for this host. Each host's calls go through that host's own CLI,
     never another agent's. The caller decides whether a call is allowed: micro-skills' proposer
@@ -398,4 +446,6 @@ def runner_for(host_name, config):
         return lambda prompt, _m="agent": codex_call(prompt, model=model)
     if host_name == "copilot":
         return lambda prompt, _m="agent": copilot_call(prompt, model=model)
+    if host_name == "grok":
+        return lambda prompt, _m="agent": grok_call(prompt, model=model)
     return lambda prompt, _m="agent": claude_call(prompt, model=model or "haiku")

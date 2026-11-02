@@ -6,7 +6,7 @@ here and nowhere else:
   * `calls`    -- `load_trajectory`: any agent's log as ordered `(name, args, result, ok)` calls;
                   `call_cwds`, `tool_usage`, `strip_rtk_prefix`;
   * `catalog`  -- the tool list a session loaded, from whichever source the agent publishes;
-  * `claude`, `codex`, `copilot`, `opencode`, `pi` -- each agent's own session file: usage,
+  * `claude`, `codex`, `copilot`, `opencode`, `pi`, `grok` -- each agent's own session file: usage,
                   metadata, prompt-turns, and the conversions that let the readers above handle
                   it.
 
@@ -26,6 +26,8 @@ from .copilot import (copilot_event_calls, copilot_mcp_servers, copilot_prompt_c
                       mcp_server_of)
 from .opencode import (opencode_prompt_count, opencode_run_reply, opencode_session_info,
                        opencode_session_to_claude, opencode_session_usage)
+from .grok import (grok_exit_code, grok_prompt_count, grok_result_text,
+                    grok_session_to_claude, grok_session_usage)
 from .pi import (pi_active_branch, pi_json_reply, pi_prompt_count, pi_session_header,
                  pi_session_to_claude, pi_session_usage)
 
@@ -44,4 +46,6 @@ __all__ = [
     "opencode_session_to_claude", "opencode_session_usage",
     "pi_active_branch", "pi_json_reply", "pi_prompt_count", "pi_session_header",
     "pi_session_to_claude", "pi_session_usage",
+    "grok_exit_code", "grok_prompt_count", "grok_result_text", "grok_session_to_claude",
+    "grok_session_usage",
 ]

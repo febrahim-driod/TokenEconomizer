@@ -502,6 +502,37 @@ the judge's gate opens in 18.1%, 15.8% and 5.8% of them.
 The plugin's proposer prompt lists each fact it holds with its claim, so a fact it has is not
 authored again under a new id; the experiments' prompt names the ids alone, as the paper ran it.
 
+**Grok Build 1.0.70.** The same `hooks/hooks.json` Claude Code loads. No `--host` flag is added
+to that file: a transcript under `.grok/sessions/`, or `GROK_HOOK_EVENT` when the transcript is
+not already another agent's, selects the host. `promptId` is the turn (tool events often omit
+it; the turn opened at `UserPromptSubmit` stays open). `subagentType` marks a child call, which
+is not folded into the parent's turn.
+
+Checked against the 1.0.70 hook and headless docs and one local `updates.jsonl`, not by a live
+session after this adapter:
+
+* SessionStart reads only a top-level `systemMessage`. UserPromptSubmit discards
+  `additionalContext`. PostToolUse delivers `hookSpecificOutput.additionalContext` (clipped at
+  10,000 characters). The plugin still builds the SessionStart context, stores it, and sends it
+  on the first PostToolUse that is not a subagent's. If that session calls no tool, the text is
+  not sent. A resume (`source` `load`) does not replay context the session file does not already
+  hold.
+* Tool pruning writes nothing for `grok`.
+* The plugin's own model call is `grok -p --output-format json --max-turns 1 --permission-mode
+  plan --no-subagents`, with the shell, edit, web and subagent tools named in `--disallowed-tools`.
+  It is not `claude -p`. An empty `--tools` value does not remove Grok's tools, so it is not used.
+* A finished session is `<GROK_HOME>/sessions/<percent-encoded cwd>/<id>/updates.jsonl`.
+  `turn_completed.usage.inputTokens` includes the cache read; the ledger stores the uncached
+  remainder. `reasoningTokens` is not inside `outputTokens` and is added to the output count.
+  The first session in a repository folds up to `backfill_sessions` of that history, once.
+* State is recorded under the host name `grok`. Sessions already stored under `claude` from
+  before this adapter are left where they are.
+* The still-stuck line is `systemMessage` on PostToolUse. Session start shows that field.
+  Whether PostToolUse shows it in the TUI was not re-checked. The redirect before it is
+  `additionalContext`, which PostToolUse does deliver to the model.
+* Stop is Esc in the terminal UI and Ctrl+C headless, the same words as the other terminal
+  agents. That key was not re-checked in a Grok TUI for this change.
+
 ## 4. State and privacy
 
 All state is local, under `$TOKENECONOMIZER_HOME` (default `~/.tokeneconomizer`), one directory

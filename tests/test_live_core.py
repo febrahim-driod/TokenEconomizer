@@ -263,7 +263,9 @@ def test_from_a_plain_terminal_te_is_about_the_agent_that_last_worked_here(tmp_p
     Code state of a repository only Codex (or Pi) had worked in."""
     from tokeneconomizer.plugin import cli
     from tokeneconomizer.plugin.paths import repo_identity, repo_state_dir
-    for k in ("TE_HOST", "CLAUDECODE", "COPILOT_CLI"):
+    # A Grok hook process exports GROK_SESSION_ID. This scenario is a plain terminal, so drop
+    # that marker too; with it set, `te` is about the Grok session it is running inside.
+    for k in ("TE_HOST", "CLAUDECODE", "COPILOT_CLI", "GROK_HOOK_EVENT", "GROK_SESSION_ID"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("TOKENECONOMIZER_HOME", str(tmp_path / "te"))
     work = tmp_path / "work"

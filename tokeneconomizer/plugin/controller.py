@@ -31,6 +31,22 @@ from .hosts import merge_outputs
 from .paths import ensure_launcher
 
 TURN_HISTORY = 200
+# Grok clips PostToolUse additionalContext at 10_000 characters.
+_DEFERRED_CAP = 10000
+
+
+def _start_context(outputs):
+    """Model context carried in hook outputs, for a host that cannot deliver it at SessionStart."""
+    parts = []
+    for item in outputs or ():
+        if not isinstance(item, dict):
+            continue
+        spec = item.get("hookSpecificOutput")
+        if isinstance(spec, dict) and isinstance(spec.get("additionalContext"), str):
+            parts.append(spec["additionalContext"])
+        elif isinstance(item.get("additionalContext"), str):
+            parts.append(item["additionalContext"])
+    return "\n\n".join(part for part in parts if part)[:_DEFERRED_CAP]
 
 
 class LiveController:
@@ -65,7 +81,7 @@ class LiveController:
 
     def _cmd(self, name):
         """How a person runs one of the plugin's commands on this host."""
-        if self.host.name in ("claude", "copilot"):    # Copilot's TUI runs plugin commands too
+        if self.host.name in ("claude", "copilot", "grok"):
             return f"/tokeneconomizer:{name}"
         if self.host.name == "pi":
             return f"/te {name}"                 # registered by the Pi extension
@@ -176,6 +192,10 @@ class LiveController:
 
         if seen != seen_before:
             self.store.write("notices.json", seen)
+        if getattr(self.host, "defers_start_context", False) and not self.cfg.shadow:
+            deferred = _start_context(outputs)
+            if deferred:
+                s["deferred_context"] = deferred
         self._save(s)
         repos.note_repo(self.ctx.root, self.ctx.repo)
         repos.prune_pins(self.ctx.root, self.host.name)
@@ -307,12 +327,24 @@ class LiveController:
         return AsyncJudge(self.ctx, self.sid, thr.get("judge_confidence"))
 
     def post_tool(self):
-        if self.cfg.loopguard == "off" or self.host.is_subagent(self.p):
+        # A subagent's call is not the parent's turn, and must not consume context the parent
+        # is still holding for its own first tool result.
+        if self.host.is_subagent(self.p):
             return {}
         # The answer names the event it answers: Claude Code rejects a PostToolUseFailure answer
         # labelled PostToolUse ("Hook returned incorrect event name", 2.1.306) and drops it whole,
         # redirect and notice -- and a stuck turn's calls are mostly failures.
         event = self.p.get("hook_event_name") or "PostToolUse"
+        deferred = ""
+        if getattr(self.host, "defers_start_context", False):
+            held = self._session()
+            if "deferred_context" in held:
+                deferred = held.pop("deferred_context") or ""
+                self._save(held)
+        if self.cfg.loopguard == "off":
+            if deferred and not self.cfg.shadow:
+                return self.host.context(event, deferred)
+            return {}
         s = self._session()
         key = self.host.turn_key(self.p)
         data = s.get("turn")
@@ -366,6 +398,8 @@ class LiveController:
                         # model passes the notice on in its reply, which they do see.
                         out = merge_outputs(out, self.host.context(event, self.host.relay(text)))
         s["turn"] = g.to_dict()
+        if deferred and not self.cfg.shadow:
+            out = merge_outputs(self.host.context(event, deferred), out)
         self._save(s)
         return out
 
