@@ -49,7 +49,9 @@ person can tune by hand:
   * backfill, backfill_sessions -- on a repository's first session, fold the most recent
                                    `backfill_sessions` of its sessions the agent kept in its
                                    own history (Claude Code's `~/.claude/projects/`), so learning
-                                   starts from them; once per repository (`backfill.py`);
+                                   starts from them; once per repository (`backfill.py`); and,
+                                   with micro-skills on, feed it up to `backfill_sessions`
+                                   folded sessions it never read (folded while it was off);
   * pi_extensions, pi_cli       -- on Pi, the extensions the plugin's own model calls load (a
                                    custom provider's, whose model they could not reach otherwise;
                                    comma-separated paths), and the `pi` they run.

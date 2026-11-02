@@ -979,6 +979,79 @@ def test_backfill_off_reads_no_history(henv, repo, tmp_path):
     assert "old" not in st.read("folded.json") and st.read("backfill.json") is None
 
 
+# ---- micro-skills turned on after the sessions were folded ----------------------------------
+def test_micro_skills_turned_on_later_catches_up_on_the_folded_history(henv, repo, tmp_path):
+    """The history is folded at the first start whatever micro-skills is set to. Folded while it
+    was off, micro-skills learned nothing from it; once on, the next start feeds it those
+    sessions, once each, without folding them again."""
+    for i in range(4):
+        _history(henv, tmp_path, repo, f"h{i}", age_s=86400 * (10 - i), i=i)
+    off = dict(henv, TE_MICROSKILLS="off")
+    run_session(off, repo, "a", trap_session(str(tmp_path / "a.jsonl"), repo, 4))
+    st = store_for(henv, repo)
+    assert st.read("backfill.json")["folded"] == 4
+    assert st.read("injection.json") is None
+
+    run_session(henv, repo, "b", trap_session(str(tmp_path / "b.jsonl"), repo, 5))
+    assert st.read("injection.json")["sessions"] == 6            # h0-h3 and a, then b's own
+    sids = [r["session_id"] for r in st.read_lines("ledger.jsonl") if r["kind"] == "session"]
+    assert sorted(sids) == ["a", "b", "h0", "h1", "h2", "h3"]    # folded once each
+    assert {e["microskills"] for e in st.read("folded.json").values()} == {"fed"}
+    assert st.read("backfill.json")["caught_up"]["microskills"] == 5
+
+    start = run_session(henv, repo, "c", trap_session(str(tmp_path / "c.jsonl"), repo, 6))
+    assert "python -m pytest" in start["hookSpecificOutput"]["additionalContext"]
+    assert st.read("injection.json")["sessions"] == 7            # c's own fold, nothing re-fed
+
+
+def test_a_session_folded_before_the_mark_was_kept_is_judged_by_its_ledger_record(
+        henv, repo, tmp_path):
+    """`folded.json` from an earlier version says only that a session was folded; its ledger
+    record says whether micro-skills read it. Only the sessions it did not read are fed."""
+    nobf = dict(henv, TE_BACKFILL="off")                  # no catch-up while these fold
+    run_session(dict(nobf, TE_MICROSKILLS="off"), repo, "x",
+                trap_session(str(tmp_path / "x.jsonl"), repo, 0))
+    run_session(nobf, repo, "y", trap_session(str(tmp_path / "y.jsonl"), repo, 1))
+    st = store_for(henv, repo)
+    assert st.read("folded.json")["x"]["microskills"] == "off"    # backfill=off: not caught up
+    st.write("folded.json", {sid: {k: v for k, v in e.items() if k != "microskills"}
+                             for sid, e in st.read("folded.json").items()})
+    assert st.read("injection.json")["sessions"] == 1
+
+    t = str(tmp_path / "z.jsonl")
+    open(t, "w").close()
+    call(henv, {"hook_event_name": "SessionStart", "session_id": "z", "source": "startup",
+                "transcript_path": t, "cwd": repo})
+    assert st.read("injection.json")["sessions"] == 2             # x, not y again
+    assert st.read("folded.json")["y"]["microskills"] == "fed"
+
+
+def test_the_catch_up_reads_at_most_backfill_sessions_and_never_retries_what_it_cannot(
+        henv, repo, tmp_path):
+    """The catch-up is bounded like the history: the most recent `backfill_sessions` unread
+    sessions, oldest first; older ones and those whose log is gone are marked, so later starts
+    do not try again."""
+    from tokeneconomizer.plugin import backfill
+    off = dict(henv, TE_MICROSKILLS="off")
+    for i in range(4):
+        path = trap_session(str(tmp_path / f"o{i}.jsonl"), repo, i)
+        run_session(off, repo, f"o{i}", path)
+        t = time.time() - 86400 * (10 - i)
+        os.utime(path, (t, t))
+    os.remove(str(tmp_path / "o3.jsonl"))
+    on = dict(henv, TE_BACKFILL_SESSIONS="2")
+    t = str(tmp_path / "now.jsonl")
+    open(t, "w").close()
+    call(on, {"hook_event_name": "SessionStart", "session_id": "now", "source": "startup",
+              "transcript_path": t, "cwd": repo})
+    st = store_for(henv, repo)
+    marks = {sid: e["microskills"] for sid, e in st.read("folded.json").items()}
+    assert marks == {"o0": "skipped", "o1": "fed", "o2": "fed", "o3": "unreadable"}
+    assert st.read("injection.json")["sessions"] == 2
+    ctx = LiveContext.build(hosts.HOSTS["claude"](), repo, on)
+    assert not backfill.needed(ctx)
+
+
 # ---- never break the session ---------------------------------------------------------------
 def test_garbage_input_and_internal_errors_answer_no_change(env, repo, monkeypatch):
     out = io.StringIO()

@@ -13,7 +13,7 @@ the hooks run) and `plugin/` (the packaging for each agent). To install and use 
 
 | Hook | What the plugin does | Mechanism it drives |
 |---|---|---|
-| `SessionStart` | Injects the repository's micro-skills (a cached render) as `additionalContext`, at a new start, and on a Copilot resume the text that session started with (§3); announces changed facts, tools the deny list newly left out, or, under `toolprune=propose` (or when `auto` could not write the file), a proposal still waiting, each in one `systemMessage` line; folds any earlier session whose end was never seen; at a repository's first session, folds its most recent `backfill_sessions` sessions from the agent's own history (Claude Code's `~/.claude/projects/`) in a detached `te backfill`, once (`backfill.json`), and says so at the next start | microskills, toolprune |
+| `SessionStart` | Injects the repository's micro-skills (a cached render) as `additionalContext`, at a new start, and on a Copilot resume the text that session started with (§3); announces changed facts, tools the deny list newly left out, or, under `toolprune=propose` (or when `auto` could not write the file), a proposal still waiting, each in one `systemMessage` line; folds any earlier session whose end was never seen; at a repository's first session, folds its most recent `backfill_sessions` sessions from the agent's own history (Claude Code's `~/.claude/projects/`) in a detached `te backfill`, once (`backfill.json`), and says so at the next start; with micro-skills on, the same process feeds it up to `backfill_sessions` folded sessions it never read (folded while it was off, marked in `folded.json`) | microskills, toolprune |
 | `UserPromptSubmit` | Opens a prompt-turn for the loop guard | loopguard |
 | `PostToolUse` | Folds the call into the turn's guard; delivers a redirect as `additionalContext`, then, if the turn is still stuck, a one-line notice to the person (on Claude Code, also as context asking the model to repeat it); never stops the turn | loopguard |
 | `PostToolUseFailure` | The same, for a call that failed (Claude Code and Copilot report a failed call only here); the answer names this event, as Claude Code requires | loopguard |
@@ -546,6 +546,14 @@ repository reads Claude Code's own session logs (`~/.claude/projects/*/*.jsonl`)
 repository's earlier sessions -- a log belongs to it when the directory it started in resolves to
 the repository's key -- and folds them like any finished session. Nothing there is written, and
 other agents' histories are not read yet.
+
+A session folded while `microskills=off` taught micro-skills nothing. When micro-skills is on, a
+session start that finds such sessions in `folded.json` runs the same `te backfill`, which feeds
+micro-skills the most recent `backfill_sessions` of them, oldest first, from the logs they were
+folded from. Only micro-skills reads them; the ledger and tool pruning counted them at their fold.
+Each entry's `microskills` mark (`fed`, `off`, `unreadable`, `skipped`) keeps a session from being
+fed twice. An entry written before the mark existed is judged by its ledger record, whose
+`injection` is non-null when micro-skills read it.
 
 Which repository a session belongs to (`plugin/paths.py`, `plugin/repos.py`):
 

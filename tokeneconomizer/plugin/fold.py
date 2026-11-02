@@ -51,6 +51,12 @@ FOLD_LOCK_WAIT_S = sidecall.TIMEOUT_S + 60
 PENDING_MAX_S = 24 * 3600
 WAITER_POLL_S = 600     # how often the waiter looks again, and so how fresh its heartbeat is
 
+# What micro-skills made of a folded session, its `folded.json` entry's "microskills": FED (it
+# learned from it), OFF (folded while micro-skills was off, so `backfill.catch_up` may feed it
+# later), UNREADABLE (no log to read), SKIPPED (older than the catch-up reaches). An entry from
+# before the mark was kept has none; the catch-up reads its ledger record instead.
+FED, OFF, UNREADABLE, SKIPPED = "fed", "off", "unreadable", "skipped"
+
 
 def _run_dir(workdir, trace_path):
     run = os.path.join(workdir, "run")
@@ -385,9 +391,7 @@ def fold_session(ctx, session_id, transcript_path=None, backfill=False):
                 record["error"] = "transcript unreadable"
             else:
                 run_dir = _run_dir(workdir, trace_path)
-                adapter = LiveAdapter(ctx.host, ctx.repo.root, vocabulary=ctx.config.vocabulary,
-                                      catalog=load_catalog(ctx.root, ctx.host.name),
-                                      protect=ctx.config.toolprune_protect)
+                adapter = _adapter(ctx)
                 with ctx.store.locked("mechanisms"):
                     inj = _fold_microskills(ctx, adapter, run_dir, session_id,
                                             injected=sess.get("injected_ids"))
@@ -418,12 +422,58 @@ def fold_session(ctx, session_id, transcript_path=None, backfill=False):
                     "spiral_judge_tokens": float(sess.get("judge_tokens", 0) or 0),
                     "spiral_nudge_writer_tokens": float(sess.get("writer_tokens", 0) or 0)}})
             ctx.store.append("ledger.jsonl", record)
-            folded[session_id] = {"at": time.time(), "transcript": transcript}
+            mark = (UNREADABLE if record.get("error")
+                    else OFF if record.get("injection") is None else FED)
+            folded[session_id] = {"at": time.time(), "transcript": transcript,
+                                  "microskills": mark}
             ctx.store.write("folded.json", folded)
             if sess:
                 sess["folded"] = True
                 ctx.store.write(sess_name, sess)
             return record
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+
+def _adapter(ctx):
+    return LiveAdapter(ctx.host, ctx.repo.root, vocabulary=ctx.config.vocabulary,
+                       catalog=load_catalog(ctx.root, ctx.host.name),
+                       protect=ctx.config.toolprune_protect)
+
+
+def feed_microskills(ctx, session_id):
+    """Micro-skills' half of `fold_session`, for a session folded while micro-skills was off:
+    the ledger and tool pruning have already counted it, so only micro-skills reads it, and its
+    paid proposer's spend is charged as an `overhead` record. Returns the session's new mark, or
+    None when it is no longer waiting (fed meanwhile), micro-skills is off, or another fold holds
+    the lock."""
+    if ctx.config.microskills == "off":
+        return None
+    with ctx.store.locked("fold", timeout=FOLD_LOCK_WAIT_S) as got:
+        if not got:
+            return None
+        folded = ctx.store.read("folded.json") or {}
+        entry = folded.get(session_id)
+        if not entry or entry.get("microskills") not in (None, OFF):
+            return None
+        workdir = tempfile.mkdtemp(prefix="te-fold-")
+        try:
+            transcript = entry.get("transcript")
+            trace_path = ctx.host.mechanism_trace(transcript, workdir) if transcript else None
+            inj = None
+            if trace_path:
+                with ctx.store.locked("mechanisms"):
+                    inj = _fold_microskills(ctx, _adapter(ctx), _run_dir(workdir, trace_path),
+                                            session_id)
+            spend = float((inj or {}).get("optimizer_tokens") or 0)
+            if spend:
+                ctx.store.append("ledger.jsonl", {
+                    "kind": "overhead", "session_id": session_id, "host": ctx.host.name,
+                    "at": time.time(), "catch_up": "microskills",
+                    "overhead": {"optimizer_tokens": spend}})
+            entry["microskills"] = FED if inj is not None else UNREADABLE
+            ctx.store.write("folded.json", folded)
+            return entry["microskills"]
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
 

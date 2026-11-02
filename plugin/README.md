@@ -560,8 +560,8 @@ of the preset. A value you set with `loopguard.<name>` wins over both. Defaults 
 | Key | Default | Values |
 |---|---|---|
 | `paid_model` | `""` | model for the plugin's own calls; empty: `haiku` on Claude Code, the agent's own default model on Codex and Pi, on Copilot `COPILOT_PROVIDER_MODEL_ID` or `COPILOT_MODEL` (unless it is `auto`), else a BYOK provider's Haiku, else Copilot's own default |
-| `backfill` | `on` | `off`: do not read the agent's own session history (Claude Code's `~/.claude/projects/`, or `$CLAUDE_CONFIG_DIR/projects/`) at a repository's first session |
-| `backfill_sessions` | `20` | how many of the repository's most recent sessions from that history are folded, once |
+| `backfill` | `on` | `off`: do not read the agent's own session history (Claude Code's `~/.claude/projects/`, or `$CLAUDE_CONFIG_DIR/projects/`) at a repository's first session, and do not feed micro-skills sessions folded while it was off |
+| `backfill_sessions` | `20` | how many of the repository's most recent sessions from that history are folded, once; also how many folded sessions micro-skills never read (folded while it was off) it is fed once it is on |
 | `pi_extensions` | `""` | Pi only: extension files (comma-separated paths) the plugin's own calls load, for a model whose provider an extension registers |
 | `pi_cli` | `""` | Pi only: the `pi` the plugin's own calls run; empty: the first on PATH |
 | `shadow` | `false` | decide and log everything, act on nothing |

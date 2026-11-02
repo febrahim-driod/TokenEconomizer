@@ -157,9 +157,11 @@ def cmd_status(args):
           f"overhead {accounting.fmt_tokens(ledger['overhead_tokens'])} "
           f"({ledger['overhead_frac']:.1%})")
     bf = out["backfill"]
+    caught = ((bf or {}).get("caught_up") or {}).get("microskills")
     print("  history      " + (f"{bf['folded']} earlier session(s) from {ctx.host.name}'s own "
                               f"history folded" if bf else
-                              "not read yet" if cfg.backfill != "off" else "not read (backfill=off)"))
+                              "not read yet" if cfg.backfill != "off" else "not read (backfill=off)")
+          + (f"; {caught} folded while micro-skills was off fed to it since" if caught else ""))
     i = out["microskills"]
     print(f"  microskills  {i['injected_lines']} fact(s) injected at session start "
           f"({i['sessions_folded']} sessions learned from)")
